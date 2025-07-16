@@ -198,7 +198,19 @@ jobs:
         # バージョン番号の整合性チェック
         cd ${{ env.SCRIPT_DIR }}
         version_in_script=$(grep "readonly VERSION=" dockeeper.sh | cut -d'"' -f2)
-        version_in_readme=$(grep "# DocKeeper v" ../README.md | head -n1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/v//')
+        
+        # README.md のパスとバージョン取得のデバッグ
+        if [ -f "../README.md" ]; then
+          readme_first_line=$(head -n1 ../README.md)
+          echo "README first line: $readme_first_line"
+          version_in_readme=$(echo "$readme_first_line" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/v//' || echo "")
+        else
+          echo "::error::README.md not found at ../README.md"
+          exit 1
+        fi
+        
+        echo "Script version: $version_in_script"
+        echo "README version: $version_in_readme"
         
         if [ "$version_in_script" != "$version_in_readme" ]; then
           echo "::error::Version mismatch - Script: $version_in_script, README: $version_in_readme"

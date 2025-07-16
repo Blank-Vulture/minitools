@@ -107,7 +107,7 @@ measure_memory_usage() {
     local memory_kb
     memory_kb=$(echo "$memory_info" | awk '{print $1}')
     
-    if [[ -n "$memory_kb" && "$memory_kb" != "0" ]]; then
+    if [[ -n "$memory_kb" && "$memory_kb" != "0" && "$memory_kb" =~ ^[0-9]+$ ]]; then
         local memory_mb
         memory_mb=$(python3 -c "print(round($memory_kb / 1024, 2))")
         log_benchmark "SUCCESS" "$description - メモリ使用量: ${memory_mb}MB"
