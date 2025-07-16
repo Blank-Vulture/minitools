@@ -62,7 +62,7 @@ measure_execution_time() {
         start_time=$(python3 -c "import time; print(time.perf_counter())")
         
         # コマンド実行（出力は抑制）
-        eval "$command" >/dev/null 2>&1 || true
+        bash -c "$command" >/dev/null 2>&1 || true
         
         local end_time
         end_time=$(python3 -c "import time; print(time.perf_counter())")

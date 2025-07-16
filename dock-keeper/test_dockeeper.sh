@@ -56,7 +56,7 @@ assert_exit_code() {
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
-    if eval "$command" >/dev/null 2>&1; then
+    if bash -c "$command" >/dev/null 2>&1; then
         actual_code=0
     else
         actual_code=$?
