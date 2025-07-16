@@ -1,4 +1,4 @@
-# DocKeeper v2.1
+# DocKeeper v2.2.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/macOS-15.5+-blue.svg)](https://www.apple.com/macos/)
@@ -246,6 +246,13 @@ MIT License - 詳細は [LICENSE](LICENSE) を参照
 ---
 
 ## 🔄 更新履歴
+
+### v2.2.0 (2024-12-15)
+- 🗑️ **REMOVE**: Dock 状態バックアップ機能を完全削除
+- 🧹 **SIMPLIFY**: `--no-backup` オプション削除
+- ✨ **FOCUS**: Homebrew Cask 更新とアイコン復元に特化
+- 🔧 **FIX**: テストスイートの未定義変数エラー修正
+- ⚡ **OPTIMIZE**: スクリプトの軽量化とシンプル化
 
 ### v2.1.0 (2024-12-15)
 - 🗂️ **STRUCTURE**: dock-keeper サブディレクトリに整理
