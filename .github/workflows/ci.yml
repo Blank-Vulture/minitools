@@ -270,7 +270,7 @@ jobs:
   notify:
     name: 📢 Notification
     runs-on: ubuntu-latest
-    needs: [security-final-check]
+    needs: [security-scan, test-suite, integration-test, quality-gate, security-final-check]
     if: always()
     
     steps:
