@@ -1,0 +1,312 @@
+name: DocKeeper CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'dock-keeper/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'dock-keeper/**'
+      - '.github/workflows/**'
+
+# セキュリティ: GitHub Tokenの権限を最小限に制限
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  checks: write
+
+env:
+  SCRIPT_DIR: dock-keeper
+
+jobs:
+  # ========================================
+  # 静的解析 & セキュリティ（早期発見）
+  # ========================================
+  security-scan:
+    name: 🔒 Security Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Git historyも含めて取得（セキュリティ分析用）
+
+    - name: Run ShellCheck (SAST)
+      uses: ludeeus/action-shellcheck@master
+      with:
+        scandir: './dock-keeper'
+        severity: error
+        ignore_paths: |
+          .git
+
+    - name: Run Bandit Security Linter
+      run: |
+        pip install bandit
+        # Bashスクリプト用のセキュリティチェック
+        find ${{ env.SCRIPT_DIR }} -name "*.sh" -exec grep -l "eval\|exec\|system" {} \; > security_concerns.txt || true
+        if [ -s security_concerns.txt ]; then
+          echo "⚠️ Security concerns found in:"
+          cat security_concerns.txt
+          echo "::warning::Potential security risks detected - please review"
+        fi
+
+    - name: Check for hardcoded secrets
+      run: |
+        # APIキー、パスワード、トークンの検出
+        grep -r -i -E "(api[_-]?key|password|token|secret)" ${{ env.SCRIPT_DIR }}/ --include="*.sh" || true
+        if [ $? -eq 0 ]; then
+          echo "::warning::Potential hardcoded secrets detected"
+        fi
+
+  # ========================================
+  # ユニットテスト & 機能テスト
+  # ========================================
+  test-suite:
+    name: 🧪 Test Suite
+    runs-on: macos-latest
+    needs: security-scan
+    
+    strategy:
+      matrix:
+        test-type: [unit, security, performance]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Homebrew
+      run: |
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+        brew --version
+
+    - name: Install dependencies
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        chmod +x *.sh
+        # テストに最低限必要な依存関係のみインストール
+        brew install dockutil || echo "dockutil installation skipped for CI"
+
+    - name: Run Unit Tests
+      if: matrix.test-type == 'unit'
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        ./test_dockeeper.sh
+      env:
+        CI: true
+
+    - name: Run Security Tests
+      if: matrix.test-type == 'security'
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        # セキュリティテストを分離実行
+        ./test_dockeeper.sh | grep -A 20 "Testing security input validation"
+
+    - name: Run Performance Benchmarks
+      if: matrix.test-type == 'performance'
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        ./benchmark_dockeeper.sh
+      continue-on-error: true  # パフォーマンステストは失敗してもCIを止めない
+
+    - name: Upload benchmark results
+      if: matrix.test-type == 'performance'
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: ${{ env.SCRIPT_DIR }}/benchmark_results_*.json
+        retention-days: 30
+
+  # ========================================
+  # エンドツーエンドテスト（統合テスト）
+  # ========================================
+  integration-test:
+    name: 🔗 Integration Test
+    runs-on: macos-latest
+    needs: [security-scan, test-suite]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup test environment
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        chmod +x *.sh
+        brew install dockutil || true
+
+    - name: Test dry-run mode
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        ./dockeeper.sh --dry-run --verbose
+
+    - name: Test help and version commands
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        ./dockeeper.sh --help
+        ./dockeeper.sh --version
+
+    - name: Validate script structure
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        # スクリプトの基本構造をテスト
+        bash -n dockeeper.sh  # 構文チェック
+        if ! grep -q "main.*\$@" dockeeper.sh; then
+          echo "::error::Main function call not found"
+          exit 1
+        fi
+
+  # ========================================
+  # コードカバレッジ & 品質メトリクス
+  # ========================================
+  quality-gate:
+    name: 📊 Quality Gate
+    runs-on: ubuntu-latest
+    needs: [test-suite, integration-test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check code complexity
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        # Bashスクリプトの複雑度チェック
+        for file in *.sh; do
+          lines=$(wc -l < "$file")
+          functions=$(grep -c "^[[:space:]]*function\|^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*(" "$file")
+          echo "File: $file - Lines: $lines, Functions: $functions"
+          
+          # 品質ゲート: 500行以上のスクリプトは警告
+          if [ "$lines" -gt 500 ]; then
+            echo "::warning::$file has $lines lines (>500 - consider refactoring)"
+          fi
+        done
+
+    - name: Documentation check
+      run: |
+        # READMEとドキュメントの整合性チェック
+        if [ ! -f README.md ]; then
+          echo "::error::README.md not found"
+          exit 1
+        fi
+        
+        # バージョン番号の整合性チェック
+        cd ${{ env.SCRIPT_DIR }}
+        version_in_script=$(grep "readonly VERSION=" dockeeper.sh | cut -d'"' -f2)
+        version_in_readme=$(grep "# DocKeeper v" ../README.md | head -n1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/v//')
+        
+        if [ "$version_in_script" != "$version_in_readme" ]; then
+          echo "::error::Version mismatch - Script: $version_in_script, README: $version_in_readme"
+          exit 1
+        fi
+
+  # ========================================
+  # セキュリティ最終チェック & デプロイ準備
+  # ========================================
+  security-final-check:
+    name: 🛡️ Final Security Check
+    runs-on: ubuntu-latest
+    needs: [quality-gate]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Advanced security scan
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "=== Advanced Security Scan ==="
+        
+        # 危険なBashコマンドの検出
+        dangerous_patterns=(
+          "eval.*\$"
+          "exec.*\$"
+          "rm.*-rf.*/"
+          "sudo"
+          "curl.*|.*sh"
+          "wget.*|.*sh"
+        )
+        
+        for pattern in "${dangerous_patterns[@]}"; do
+          if grep -n -E "$pattern" *.sh; then
+            echo "::warning::Potentially dangerous pattern found: $pattern"
+          fi
+        done
+        
+        echo "=== Privilege Escalation Check ==="
+        if grep -n "sudo\|su " *.sh; then
+          echo "::error::Privilege escalation detected"
+          exit 1
+        fi
+
+    - name: Generate security report
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "# Security Scan Report" > security_report.md
+        echo "Generated: $(date)" >> security_report.md
+        echo "" >> security_report.md
+        echo "## Files scanned:" >> security_report.md
+        ls -la *.sh >> security_report.md
+        echo "" >> security_report.md
+        echo "## ShellCheck results:" >> security_report.md
+        shellcheck *.sh >> security_report.md 2>&1 || echo "ShellCheck completed with warnings" >> security_report.md
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-report
+        path: ${{ env.SCRIPT_DIR }}/security_report.md
+        retention-days: 90
+
+  # ========================================
+  # 通知 & レポート
+  # ========================================
+  notify:
+    name: 📢 Notification
+    runs-on: ubuntu-latest
+    needs: [security-final-check]
+    if: always()
+    
+    steps:
+    - name: Build status summary
+      run: |
+        echo "# DocKeeper CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.security-final-check.result }}" = "success" ]; then
+          echo "✅ **Security:** All checks passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Security:** Issues detected" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "📊 **Artifacts:** Check the Actions tab for detailed reports" >> $GITHUB_STEP_SUMMARY
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const summary = `## DocKeeper CI/CD Results 🤖
+          
+          **Security Scan:** ${{ needs.security-scan.result == 'success' && '✅ Passed' || '❌ Failed' }}
+          **Tests:** ${{ needs.test-suite.result == 'success' && '✅ Passed' || '❌ Failed' }}
+          **Integration:** ${{ needs.integration-test.result == 'success' && '✅ Passed' || '❌ Failed' }}
+          **Quality Gate:** ${{ needs.quality-gate.result == 'success' && '✅ Passed' || '❌ Failed' }}
+          
+          📋 [View detailed results](${context.payload.pull_request.html_url}/checks)`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          }); 

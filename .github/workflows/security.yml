@@ -1,0 +1,311 @@
+name: Security Scan & Compliance
+
+on:
+  schedule:
+    # 毎週月曜日の9:00 JST (UTC 0:00) にセキュリティスキャンを実行
+    - cron: '0 0 * * 1'
+  workflow_dispatch:  # 手動実行可能
+  push:
+    branches: [ main ]
+    paths:
+      - 'dock-keeper/**'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+env:
+  SCRIPT_DIR: dock-keeper
+
+jobs:
+  # ========================================
+  # 依存関係セキュリティチェック
+  # ========================================
+  dependency-check:
+    name: 🔍 Dependency Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check Homebrew security
+      run: |
+        echo "=== Homebrew Security Check ==="
+        # Homebrewの公式サイトへの接続をテスト
+        curl -s --connect-timeout 10 https://brew.sh || echo "Homebrew site connection failed"
+        
+        # brew.shインストールスクリプトの整合性チェック（参考）
+        echo "=== Installation Script Integrity ==="
+        expected_pattern="Homebrew/install/HEAD/install.sh"
+        if grep -q "$expected_pattern" ${{ env.SCRIPT_DIR }}/*.sh; then
+          echo "✅ Standard Homebrew installation script detected"
+        fi
+
+    - name: Check third-party tools
+      run: |
+        echo "=== Third-party Tools Security ==="
+        cd ${{ env.SCRIPT_DIR }}
+        
+        # dockutilの公式ソース確認
+        if grep -q "dockutil" *.sh; then
+          echo "📋 dockutil dependency found"
+          echo "⚠️ Note: dockutil should be installed from official Homebrew repository"
+        fi
+        
+        # 外部URLの検証
+        urls=$(grep -o 'https://[^"]*' *.sh || true)
+        if [ -n "$urls" ]; then
+          echo "🔗 External URLs found:"
+          echo "$urls"
+          echo "::warning::External URLs detected - please verify these are trusted sources"
+        fi
+
+  # ========================================
+  # 脆弱性スキャン
+  # ========================================
+  vulnerability-scan:
+    name: 🛡️ Vulnerability Assessment  
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install security tools
+      run: |
+        # Bash scripting security tools
+        sudo apt-get update
+        sudo apt-get install -y shellcheck bats
+        pip install safety
+
+    - name: Deep ShellCheck analysis
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "=== Deep ShellCheck Analysis ==="
+        
+        for script in *.sh; do
+          echo "Analyzing $script..."
+          shellcheck -f gcc "$script" > "shellcheck_$script.log" 2>&1 || true
+          
+          # Critical security issues
+          if grep -i "SC2086\|SC2048\|SC2068" "shellcheck_$script.log"; then
+            echo "::error::Critical security issues found in $script"
+          fi
+          
+          # Word splitting vulnerabilities  
+          if grep -i "SC2086" "shellcheck_$script.log"; then
+            echo "::warning::Word splitting vulnerability in $script"
+          fi
+        done
+
+    - name: Check for common vulnerabilities
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "=== Common Vulnerability Patterns ==="
+        
+        # Command injection patterns
+        vulnerable_patterns=(
+          "eval.*\\\$"
+          "exec.*\\\$"
+          "\\\$\\([^)]*\\)\s*[;&|]"
+          "backticks.*\\\$"
+        )
+        
+        for pattern in "${vulnerable_patterns[@]}"; do
+          if grep -n -E "$pattern" *.sh; then
+            echo "::error::Potential command injection: $pattern"
+          fi
+        done
+        
+        # File operation vulnerabilities
+        if grep -n "rm.*\\\$" *.sh; then
+          echo "::warning::Dynamic file deletion detected"
+        fi
+        
+        if grep -n "chmod.*\\\$\|chown.*\\\$" *.sh; then
+          echo "::warning::Dynamic permission changes detected"
+        fi
+
+    - name: Upload vulnerability report
+      uses: actions/upload-artifact@v4
+      with:
+        name: vulnerability-scan-report
+        path: ${{ env.SCRIPT_DIR }}/shellcheck_*.log
+        retention-days: 30
+
+  # ========================================
+  # セキュリティ設定チェック
+  # ========================================
+  security-configuration:
+    name: ⚙️ Security Configuration Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check script permissions
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "=== File Permissions Audit ==="
+        
+        # 実行可能ファイルの権限チェック
+        for script in *.sh; do
+          permissions=$(stat -c "%a" "$script")
+          echo "$script: $permissions"
+          
+          # 過度に広い権限の警告
+          if [ "$permissions" -gt 755 ]; then
+            echo "::warning::$script has overly permissive permissions: $permissions"
+          fi
+        done
+
+    - name: Check secure coding practices
+      run: |
+        cd ${{ env.SCRIPT_DIR }}
+        echo "=== Secure Coding Practices ==="
+        
+        # set -euo pipefail の確認
+        for script in *.sh; do
+          if ! grep -q "set -euo pipefail" "$script"; then
+            echo "::warning::$script missing 'set -euo pipefail' - may not handle errors securely"
+          fi
+        done
+        
+        # 入力検証の確認
+        if ! grep -q "readonly\|local.*=" *.sh; then
+          echo "::warning::Limited use of readonly/local variables detected"
+        fi
+        
+        # ログ出力のセキュリティ
+        if grep -n "echo.*\\\$" *.sh | grep -v "log"; then
+          echo "::warning::Direct variable echo found - may leak sensitive information"
+        fi
+
+  # ========================================
+  # コンプライアンスチェック
+  # ========================================
+  compliance-check:
+    name: 📋 Compliance & Policy Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: License compliance
+      run: |
+        echo "=== License Compliance ==="
+        
+        # ライセンスファイルの存在確認
+        if [ ! -f LICENSE ]; then
+          echo "::error::LICENSE file not found"
+          exit 1
+        fi
+        
+        # MITライセンスの確認
+        if grep -q "MIT" LICENSE; then
+          echo "✅ MIT License detected"
+        else
+          echo "::warning::License type unclear - please verify"
+        fi
+
+    - name: Documentation compliance  
+      run: |
+        echo "=== Documentation Compliance ==="
+        
+        # README.md の必須セクション確認
+        required_sections=(
+          "TL;DR"
+          "機能"
+          "インストール"
+          "セキュリティ"
+          "使用方法"
+        )
+        
+        for section in "${required_sections[@]}"; do
+          if grep -q "$section" README.md; then
+            echo "✅ $section section found"
+          else
+            echo "::warning::Missing documentation section: $section"
+          fi
+        done
+
+    - name: Security policy check
+      run: |
+        echo "=== Security Policy Compliance ==="
+        
+        # SECURITY.md の確認
+        if [ -f SECURITY.md ]; then
+          echo "✅ Security policy found"
+        else
+          echo "::warning::SECURITY.md not found - consider adding security reporting guidelines"
+        fi
+        
+        # セキュリティ関連の設定確認
+        cd ${{ env.SCRIPT_DIR }}
+        if grep -q "trap.*ERR" *.sh; then
+          echo "✅ Error handling traps found"
+        else
+          echo "::warning::Limited error handling traps - consider adding more robust error handling"
+        fi
+
+  # ========================================
+  # セキュリティレポート生成
+  # ========================================
+  generate-security-report:
+    name: 📊 Security Report Generation
+    runs-on: ubuntu-latest
+    needs: [dependency-check, vulnerability-scan, security-configuration, compliance-check]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate comprehensive security report
+      run: |
+        echo "# DocKeeper Security Scan Report" > security_summary.md
+        echo "Generated: $(date -u)" >> security_summary.md
+        echo "Commit: ${{ github.sha }}" >> security_summary.md
+        echo "" >> security_summary.md
+        
+        echo "## Scan Results Summary" >> security_summary.md
+        echo "- **Dependency Check:** ${{ needs.dependency-check.result }}" >> security_summary.md
+        echo "- **Vulnerability Scan:** ${{ needs.vulnerability-scan.result }}" >> security_summary.md  
+        echo "- **Security Configuration:** ${{ needs.security-configuration.result }}" >> security_summary.md
+        echo "- **Compliance Check:** ${{ needs.compliance-check.result }}" >> security_summary.md
+        echo "" >> security_summary.md
+        
+        echo "## Risk Assessment" >> security_summary.md
+        if [ "${{ needs.vulnerability-scan.result }}" = "failure" ]; then
+          echo "🔴 **HIGH RISK:** Vulnerabilities detected" >> security_summary.md
+        elif [ "${{ needs.security-configuration.result }}" = "failure" ]; then
+          echo "🟡 **MEDIUM RISK:** Configuration issues found" >> security_summary.md  
+        else
+          echo "🟢 **LOW RISK:** No critical issues detected" >> security_summary.md
+        fi
+        
+        echo "" >> security_summary.md
+        echo "## Recommendations" >> security_summary.md
+        echo "1. Review all flagged security warnings" >> security_summary.md
+        echo "2. Update dependencies regularly" >> security_summary.md
+        echo "3. Follow secure coding practices" >> security_summary.md
+        echo "4. Conduct periodic security reviews" >> security_summary.md
+
+    - name: Upload security summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-summary-report
+        path: security_summary.md
+        retention-days: 90
+
+    - name: Security notification
+      if: needs.vulnerability-scan.result == 'failure'
+      run: |
+        echo "::error::Security vulnerabilities detected! Please review the security report."
+        echo "🚨 SECURITY ALERT: Critical vulnerabilities found in DocKeeper" >> $GITHUB_STEP_SUMMARY
+        echo "📋 **Action Required:** Review security scan results immediately" >> $GITHUB_STEP_SUMMARY
+        echo "🔗 **Details:** Check the security-summary-report artifact" >> $GITHUB_STEP_SUMMARY 

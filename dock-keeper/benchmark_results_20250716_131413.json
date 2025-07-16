@@ -1,0 +1,36 @@
+{
+  "benchmark_info": {
+    "timestamp": "2025-07-16T13:14:15+09:00",
+    "script_version": "DocKeeper v2.2.0",
+    "runs_per_test": 5,
+    "system": {
+      "os": "15.5",
+      "cpu": "Apple M3",
+      "memory_gb": 24,
+      "homebrew_version": "Homebrew 4.5.10-22-ga2bc05b"
+    }
+  },
+  "results": {
+    "help_command": {
+      "avg_execution_time_s": 0.023775941401254386,
+      "memory_usage_mb": "2144.0"
+    },
+    "version_command": {
+      "avg_execution_time_s": 0.016839433205313982,
+      "memory_usage_mb": "1952.0"
+    },
+    "dry_run_command": {
+      "avg_execution_time_s": 0.08859553340589628,
+      "memory_usage_mb": "5184.0"
+    },
+    "dock_list_operation": {
+      "avg_execution_time_s": 0.018366591597441584
+    }
+  },
+  "performance_targets": {
+    "help_command_max_s": 1.0,
+    "dry_run_max_s": 30.0,
+    "memory_usage_max_mb": 50.0,
+    "dock_operations_max_s": 2.0
+  }
+}
