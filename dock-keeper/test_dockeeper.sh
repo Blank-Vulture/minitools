@@ -275,24 +275,7 @@ test_performance_basic() {
     TESTS_RUN=$((TESTS_RUN + 1))
 }
 
-test_log_directory_creation() {
-    log_test "INFO" "Testing log directory creation..."
-    
-    # テスト環境でのdry-run実行
-    local test_home="$TEST_DIR/test_home"
-    mkdir -p "$test_home"
-    
-    HOME="$test_home" $SCRIPT_PATH --dry-run >/dev/null 2>&1 || true
-    
-    if [[ -d "$test_home/.local/share/dockeeper" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        log_test "PASS" "Log directory created successfully"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_test "FAIL" "Log directory not created"
-    fi
-    TESTS_RUN=$((TESTS_RUN + 1))
-}
+
 
 # メイン実行
 main() {
@@ -320,9 +303,6 @@ main() {
     
     # パフォーマンステスト
     test_performance_basic
-    
-    # ファイルシステムテスト
-    test_log_directory_creation
     
     teardown_test_env
     

@@ -7,7 +7,6 @@ set -euo pipefail
 # 設定
 readonly SCRIPT_PATH="$(dirname "$0")/dockeeper.sh"
 readonly BENCHMARK_RUNS=5
-readonly RESULTS_FILE="benchmark_results_$(date '+%Y%m%d_%H%M%S').json"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -137,52 +136,7 @@ benchmark_dock_operations() {
     log_benchmark "SUCCESS" "現在のDockアイテム数: $current_dock_count"
 }
 
-# ベンチマーク結果をJSONで出力
-save_results_json() {
-    local timestamp
-    timestamp=$(date -Iseconds)
-    
-    cat > "$RESULTS_FILE" << EOF
-{
-  "benchmark_info": {
-    "timestamp": "$timestamp",
-    "script_version": "DocKeeper v2.2.0",
-    "runs_per_test": $BENCHMARK_RUNS,
-    "system": {
-      "os": "$(sw_vers -productVersion)",
-      "cpu": "$(sysctl -n machdep.cpu.brand_string)",
-      "memory_gb": $(sysctl -n hw.memsize | awk '{print $1/1024/1024/1024}'),
-      "homebrew_version": "$(brew --version | head -n1)"
-    }
-  },
-  "results": {
-    "help_command": {
-      "avg_execution_time_s": ${execution_times[0]:-"null"},
-      "memory_usage_mb": "${memory_usage[0]:-"N/A"}"
-    },
-    "version_command": {
-      "avg_execution_time_s": ${execution_times[1]:-"null"},
-      "memory_usage_mb": "${memory_usage[1]:-"N/A"}"
-    },
-    "dry_run_command": {
-      "avg_execution_time_s": ${execution_times[2]:-"null"},
-      "memory_usage_mb": "${memory_usage[2]:-"N/A"}"
-    },
-    "dock_list_operation": {
-      "avg_execution_time_s": ${execution_times[3]:-"null"}
-    }
-  },
-  "performance_targets": {
-    "help_command_max_s": 1.0,
-    "dry_run_max_s": 30.0,
-    "memory_usage_max_mb": 50.0,
-    "dock_operations_max_s": 2.0
-  }
-}
-EOF
-    
-    log_benchmark "SUCCESS" "ベンチマーク結果を保存: $RESULTS_FILE"
-}
+
 
 # パフォーマンス分析
 analyze_performance() {
@@ -278,9 +232,6 @@ main() {
     
     # 結果分析
     analyze_performance
-    
-    # JSON結果保存
-    save_results_json
     
     # レコメンデーション
     generate_recommendations

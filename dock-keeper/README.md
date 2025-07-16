@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/macOS-15.5+-blue.svg)](https://www.apple.com/macos/)
-[![Homebrew](https://img.shields.io/badge/Homebrew-4.5+-orange.svg)](https://brew.sh)
+[![Homebrew](https://img.shields.io/badge/Homebrew-4.0+-orange.svg)](https://brew.sh)
 
 **Homebrew Cask更新時のDockアイコン自動復元ツール**
 
@@ -63,9 +63,6 @@ chmod +x dockeeper.sh
 
 # 詳細ログ付き実行
 ./dockeeper.sh --verbose
-
-# 通知なし実行
-./dockeeper.sh --no-notify
 ```
 
 ### 3. コマンドオプション
@@ -76,27 +73,6 @@ chmod +x dockeeper.sh
 | `-v, --verbose` | 詳細ログ表示 | `./dockeeper.sh -v` |
 | `-h, --help` | ヘルプ表示 | `./dockeeper.sh --help` |
 | `--version` | バージョン表示 | `./dockeeper.sh --version` |
-
----
-
-## 📁 ファイル構成
-
-```
-~/.local/share/dockeeper/
-├── dockeeper.log                    # 実行ログ
-├── config.json                      # 設定ファイル
-└── ...
-```
-
-### 設定ファイル例（config.json）
-
-```json
-{
-  "notification_enabled": true,
-  "excluded_apps": [],
-  "auto_install_deps": true
-}
-```
 
 ---
 
