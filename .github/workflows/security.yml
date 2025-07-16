@@ -226,7 +226,7 @@ jobs:
         )
         
         for section in "${required_sections[@]}"; do
-          if grep -q "$section" README.md; then
+          if grep -q "$section" ${{ env.SCRIPT_DIR }}/README.md; then
             echo "✅ $section section found"
           else
             echo "::warning::Missing documentation section: $section"
@@ -238,7 +238,7 @@ jobs:
         echo "=== Security Policy Compliance ==="
         
         # SECURITY.md の確認
-        if [ -f SECURITY.md ]; then
+        if [ -f ${{ env.SCRIPT_DIR }}/SECURITY.md ]; then
           echo "✅ Security policy found"
         else
           echo "::warning::SECURITY.md not found - consider adding security reporting guidelines"

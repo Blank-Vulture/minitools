@@ -154,8 +154,29 @@ check_and_install_dependencies() {
     fi
     
     # brew-cask-upgradeチェック（推奨）
-    log "INFO" "  brew-cask-upgrade (brew cu) の確認中..."
-    if ! command -v brew-cask-upgrade >/dev/null 2>&1; then
+    log "INFO" "  brew cu コマンドの確認中..."
+    
+    # 複数のアプローチでbrew cuの可用性をチェック
+    local brew_cu_available=false
+    
+    # アプローチ1: brew cu --help を試行
+    if brew cu --help >/dev/null 2>&1; then
+        brew_cu_available=true
+        log "SUCCESS" "  brew cu コマンドが利用可能（--help で確認）"
+    # アプローチ2: brew tap でbuo/cask-upgradeの存在確認
+    elif brew tap | grep -q "buo/cask-upgrade"; then
+        # tapは存在するが、何らかの理由でコマンドが見つからない場合の再確認
+        if brew cu --version >/dev/null 2>&1 || brew cu 2>&1 | grep -q "Usage:"; then
+            brew_cu_available=true
+            log "SUCCESS" "  brew cu コマンドが利用可能（tap確認）"
+        fi
+    # アプローチ3: brew commands での確認
+    elif brew commands | grep -q "^cu$"; then
+        brew_cu_available=true
+        log "SUCCESS" "  brew cu コマンドが利用可能（commands で確認）"
+    fi
+    
+    if [[ "$brew_cu_available" == false ]]; then
         log "WARN" "  brew cu が見つかりません"
         log "INFO" "  brew cu は包括的なCaskアップデートを提供します"
         
@@ -164,15 +185,18 @@ check_and_install_dependencies() {
         if [[ "${DRY_RUN}" == false ]]; then
             echo "  buo/cask-upgrade tap の追加中..."
             if brew tap buo/cask-upgrade; then
-                log "SUCCESS" "  brew-cask-upgrade (brew cu) のインストールが完了"
+                # インストール後の確認
+                if brew cu --help >/dev/null 2>&1; then
+                    log "SUCCESS" "  brew cu コマンドのインストールが完了"
+                else
+                    log "WARN" "  brew cu tap は追加されましたが、コマンドの動作確認に失敗"
+                fi
             else
                 log "WARN" "  buo/cask-upgrade tap の追加に失敗しました（標準コマンドを使用）"
             fi
         else
             log "INFO" "[DRY-RUN] brew tap buo/cask-upgrade"
         fi
-    else
-        log "SUCCESS" "  brew-cask-upgrade (brew cu) が利用可能"
     fi
     
     # 依存関係のインストール
@@ -211,7 +235,20 @@ confirm_execution() {
     echo "📋 実行予定の操作："
     echo "  1. brew update (Homebrewの更新)"
     echo "  2. brew upgrade (formulaeの更新)"
-    if command -v brew-cask-upgrade >/dev/null 2>&1; then
+    
+    # brew cuの可用性をチェック（実行時と同じロジック）
+    local brew_cu_available_prompt=false
+    if brew cu --help >/dev/null 2>&1; then
+        brew_cu_available_prompt=true
+    elif brew tap | grep -q "buo/cask-upgrade"; then
+        if brew cu --version >/dev/null 2>&1 || brew cu 2>&1 | grep -q "Usage:"; then
+            brew_cu_available_prompt=true
+        fi
+    elif brew commands | grep -q "^cu$"; then
+        brew_cu_available_prompt=true
+    fi
+    
+    if [[ "$brew_cu_available_prompt" == true ]]; then
         echo "  3. brew cu -f -a (包括的cask更新)"
         echo "  4. brew cleanup (キャッシュクリア)"
         echo "  5. Dock差分確認と復元"
@@ -293,18 +330,60 @@ perform_updates() {
         
         # Caskアップデート: brew cu を優先使用
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        if command -v brew-cask-upgrade >/dev/null 2>&1; then
+        
+        # brew cuの可用性をチェック（依存関係チェックと同じロジック）
+        local brew_cu_available=false
+        if brew cu --help >/dev/null 2>&1; then
+            brew_cu_available=true
+        elif brew tap | grep -q "buo/cask-upgrade"; then
+            if brew cu --version >/dev/null 2>&1 || brew cu 2>&1 | grep -q "Usage:"; then
+                brew_cu_available=true
+            fi
+        elif brew commands | grep -q "^cu$"; then
+            brew_cu_available=true
+        fi
+        
+        if [[ "$brew_cu_available" == true ]]; then
             log "INFO" "🍺 brew cu -f -a (包括的cask upgrade) 実行中..."
-            if ! timeout 1800 bash -c 'yes | brew cu -f -a'; then
-                log "WARN" "brew cu で警告が発生またはタイムアウトしました"
-                
-                # brew cu が失敗した場合のフォールバック
-                log "INFO" "標準コマンドでCaskアップデートを試行します..."
-                if ! brew upgrade --cask --greedy; then
-                    log "WARN" "brew upgrade --cask でも警告が発生しました"
+            
+            # タイムアウトコマンドの利用可能性チェック（macOS互換性向上）
+            local timeout_cmd=""
+            if command -v gtimeout >/dev/null 2>&1; then
+                timeout_cmd="gtimeout 1800"
+                log "INFO" "  gtimeout を使用してタイムアウト制御（30分）"
+            elif command -v timeout >/dev/null 2>&1; then
+                timeout_cmd="timeout 1800"
+                log "INFO" "  timeout を使用してタイムアウト制御（30分）"
+            else
+                log "INFO" "  タイムアウト制御なしで実行（Ctrl+Cで中断可能）"
+            fi
+            
+            # brew cu実行（yes応答付き）
+            local brew_cu_cmd="yes | brew cu -f -a"
+            if [[ -n "$timeout_cmd" ]]; then
+                if ! $timeout_cmd bash -c "$brew_cu_cmd"; then
+                    log "WARN" "brew cu で警告が発生またはタイムアウトしました"
+                    
+                    # brew cu が失敗した場合のフォールバック
+                    log "INFO" "標準コマンドでCaskアップデートを試行します..."
+                    if ! brew upgrade --cask --greedy; then
+                        log "WARN" "brew upgrade --cask でも警告が発生しました"
+                    fi
+                else
+                    log "SUCCESS" "brew cu による包括的なCaskアップデートが完了"
                 fi
             else
-                log "SUCCESS" "brew cu による包括的なCaskアップデートが完了"
+                if ! bash -c "$brew_cu_cmd"; then
+                    log "WARN" "brew cu で警告が発生しました"
+                    
+                    # brew cu が失敗した場合のフォールバック
+                    log "INFO" "標準コマンドでCaskアップデートを試行します..."
+                    if ! brew upgrade --cask --greedy; then
+                        log "WARN" "brew upgrade --cask でも警告が発生しました"
+                    fi
+                else
+                    log "SUCCESS" "brew cu による包括的なCaskアップデートが完了"
+                fi
             fi
         else
             log "INFO" "🍺 brew upgrade --cask --greedy (標準cask upgrade) 実行中..."
@@ -342,12 +421,25 @@ perform_updates() {
         log "INFO" "[DRY-RUN]   1. 実行前確認プロンプト"
         log "INFO" "[DRY-RUN]   2. brew update"
         log "INFO" "[DRY-RUN]   3. brew upgrade (formulae)"  
-        if command -v brew-cask-upgrade >/dev/null 2>&1; then
+        
+        # brew cuの可用性を再チェック（DRY-RUN用）
+        local brew_cu_available_dryrun=false
+        if brew cu --help >/dev/null 2>&1; then
+            brew_cu_available_dryrun=true
+        elif brew tap | grep -q "buo/cask-upgrade"; then
+            if brew cu --version >/dev/null 2>&1 || brew cu 2>&1 | grep -q "Usage:"; then
+                brew_cu_available_dryrun=true
+            fi
+        elif brew commands | grep -q "^cu$"; then
+            brew_cu_available_dryrun=true
+        fi
+        
+        if [[ "$brew_cu_available_dryrun" == true ]]; then
             log "INFO" "[DRY-RUN]   4. brew cu -f -a (包括的cask upgrade)"
             log "INFO" "[DRY-RUN]   5. brew cleanup"
             log "INFO" "[DRY-RUN]   6. Dock差分確認と復元"
         else
-            log "INFO" "[DRY-RUN]   4. brew-cask-upgrade 自動インストール"
+            log "INFO" "[DRY-RUN]   4. brew tap buo/cask-upgrade (必要に応じて自動インストール)"
             log "INFO" "[DRY-RUN]   5. brew upgrade --cask --greedy (標準cask upgrade)"
             log "INFO" "[DRY-RUN]   6. brew cleanup"
             log "INFO" "[DRY-RUN]   7. Dock差分確認と復元"
@@ -369,19 +461,23 @@ restore_dock_items() {
     local before_dock_file="$1"
     local after_dock_file="$2"
     
-    # ファイルから配列に読み込み
+    # ファイルから配列に読み込み（bash 3.x 互換）
     local before_dock=()
     local after_dock=()
     
     if [[ -f "$before_dock_file" ]]; then
-        mapfile -t before_dock < "$before_dock_file"
+        while IFS= read -r line; do
+            before_dock+=("$line")
+        done < "$before_dock_file"
     else
         log "WARN" "更新前Dock状態ファイルが見つかりません: $before_dock_file"
         return 1
     fi
     
     if [[ -f "$after_dock_file" ]]; then
-        mapfile -t after_dock < "$after_dock_file"
+        while IFS= read -r line; do
+            after_dock+=("$line")
+        done < "$after_dock_file"
     else
         log "WARN" "更新後Dock状態ファイルが見つかりません: $after_dock_file"
         return 1
@@ -494,9 +590,6 @@ cleanup() {
                          echo "📋 実行結果サマリー:"
              echo "  • Homebrew更新: 完了"
              echo "  • Dock復元: $APPS_RESTORED_COUNT 個のアプリを処理"
-            echo
-                         echo "💡 次回実行時のヒント:"
-             echo "  • 定期実行: crontabやLaunchAgent設定を検討"
             ;;
         "execution_cancelled")
             log "INFO" "📋 実行がキャンセルされました"

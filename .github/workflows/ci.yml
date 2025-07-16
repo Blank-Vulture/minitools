@@ -190,8 +190,8 @@ jobs:
     - name: Documentation check
       run: |
         # READMEとドキュメントの整合性チェック
-        if [ ! -f README.md ]; then
-          echo "::error::README.md not found"
+        if [ ! -f ${{ env.SCRIPT_DIR }}/README.md ]; then
+          echo "::error::README.md not found in ${{ env.SCRIPT_DIR }}/"
           exit 1
         fi
         
@@ -199,13 +199,13 @@ jobs:
         cd ${{ env.SCRIPT_DIR }}
         version_in_script=$(grep "readonly VERSION=" dockeeper.sh | cut -d'"' -f2)
         
-        # README.md のパスとバージョン取得のデバッグ
-        if [ -f "../README.md" ]; then
-          readme_first_line=$(head -n1 ../README.md)
+        # README.md のバージョン取得（現在のディレクトリ内）
+        if [ -f "README.md" ]; then
+          readme_first_line=$(head -n1 README.md)
           echo "README first line: $readme_first_line"
           version_in_readme=$(echo "$readme_first_line" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | sed 's/v//' || echo "")
         else
-          echo "::error::README.md not found at ../README.md"
+          echo "::error::README.md not found in current directory (${{ env.SCRIPT_DIR }})"
           exit 1
         fi
         
